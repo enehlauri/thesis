@@ -188,7 +188,7 @@ def train_and_testMLP(data):
     
                 model_mlp.fit(X_train, Y_train, epochs=10, verbose=1,
                               batch_size=16, class_weight=class_weight)
-    
+                # Will work on work forward validationa next
                 # Testing and reporting results
                 prob = model_mlp.predict(X_test)
                 Y_pred = np.argmax(prob, axis=1)
@@ -253,6 +253,8 @@ def train_and_testLSTM(data):
                 model_lstm.fit(X_train, Y_train, epochs=6, verbose=1,
                               batch_size=16, class_weight=class_weight)
                 
+                
+                # Will work on work forward validationa next
                 # Testing and reporting results
                 prob = model_lstm.predict(X_test)
                 Y_pred = np.argmax(prob, axis=1)
@@ -316,7 +318,7 @@ def train_and_testCNN(data):
             model_cnn = cnn_model(X_train.shape, net_width, net_depth)
     
             model_cnn.fit(X_train, Y_train, batch_size = 32, epochs=20)
-            
+            # Will work on work forward validationa next
             # Testing and reporting results
             prob = model_cnn.predict(X_test)
             prob = np.reshape(prob, (prob.shape[0], num_classes))
