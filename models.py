@@ -257,7 +257,6 @@ def train_and_test_model(X, Y, model_type):
     
     return all_results
 
-
 loc = 'C:\\Users\\enehl\\OneDrive - TUNI.fi\\Opiskelu\\Kandi'  
 data = np.load(loc + '\\Code\\data.npy')
 
@@ -265,8 +264,8 @@ N_TOP_ACTIVE = 100
 num_classes = 3
 window = 20
 class_weights = {0: 1.,
-                1: 5.,
-                2: 5.}
+                1: 8.,
+                2: 9.5}
 
 X, Y = format_data(data, window)
 Y = to_categorical(Y, num_classes)
