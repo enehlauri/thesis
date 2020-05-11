@@ -8,6 +8,7 @@ from tensorflow.keras.utils import to_categorical
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 from sklearn.metrics import precision_score, recall_score, f1_score 
 from keras.callbacks.callbacks import EarlyStopping
+from tensorflow.keras import optimizers
 import numpy as np
 from matplotlib import pyplot as plt
 import copy
@@ -103,75 +104,100 @@ def format_data(data, days):
     print('Input and output prepared')
     return X, Y
 
-def attention_layer(inputs, length, width):
-    # From mäkinen et al. 2019
-    att_weights = Dense(1, activation='tanh')(inputs)
-    att_weights = Flatten()(att_weights)
-    att_weights = Activation('softmax')(att_weights)
-    att_weights = RepeatVector(width)(att_weights)
-    att_weights = Permute([2, 1])(att_weights)
-    weighted_input = multiply([inputs, att_weights])
-    return weighted_input
-
-def mlp_model(input_shape, neurons, net_width, net_depth):
+def attention_layer(H, height, length):
+        
+    M = Activation('tanh')(H)
+    alpha = Dense(1, activation='softmax')(M)
+    alpha = Flatten()(alpha)
+    alpha = RepeatVector(length)(alpha)
+    alpha_T = Permute ([2, 1])(alpha)
     
-    input_height = input_shape[2]
+    weighted_H = multiply([H, alpha_T])
+    
+    if height == 1:
+        weighted_H = Reshape([13])(weighted_H)
+        
+    return weighted_H
 
-    inputs = Input(shape=(input_height))
-    layer = inputs
+def mlp_model(input_shape, neurons, net_width, net_depth, attention=True):
+    
+    opt = optimizers.Adam(lr=0.001)
+    
+    input_lenght = input_shape[2]
+
+    inputs = Input(shape=(input_lenght))
+    
+    if attention:
+        layer = attention_layer(inputs, 1, input_lenght)
+    else:
+        layer = inputs
     
     for i in range(net_depth):
         layer = Dense(neurons*net_width, activation='softmax')(layer)
+        layer = Dropout(0.4)(layer)
         
     outputs = Dense(num_classes, activation='softmax')(layer)
     
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(loss='categorical_crossentropy',
-                  optimizer='adam',
+                  optimizer=opt,
                   metrics=[]) #'accuracy', get_f1. Per class accuracy?
     return model
 
-def lstm_model(input_shape, neurons, net_width, net_depth):
+def lstm_model(input_shape, neurons, net_width, net_depth, attention=True):
+    
+    opt = optimizers.Adam(lr=0.001)
     
     time_steps = input_shape[1]
     features = input_shape[2]
     
     inputs = Input(shape=(time_steps, features))
-    layer = inputs
+    if attention:
+        layer = attention_layer(inputs, time_steps, features)
+    else:
+        layer = inputs
+    
         
     for i in range(net_depth):
         # return sequences True, except on the last layer
-        return_seq = True if not (i+1 == net_depth) else False
+        return_seq = True if (i+1 != net_depth) else False
             
         layer = LSTM(neurons*net_width, activation='softmax', 
                      return_sequences=return_seq)(layer)
+        layer = Dropout(0.25)(layer)
     
-    outputs = Dense(num_classes, activation='softmax', dynamic=True)(layer)
+    outputs = Dense(num_classes, activation='softmax', dynamic=False)(layer)
     
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(loss='categorical_crossentropy', 
-                  optimizer='adam', 
+                  optimizer=opt, 
                   metrics=['accuracy', get_f1]) 
     return model
 
-def cnn_model(input_shape, net_width, net_depth, attention=False):
+def cnn_model(input_shape, net_width, net_depth, attention=True):
     
-    conv_size = 4
-    filters = 32
+    opt = optimizers.Adam(lr=0.001)
+    
+    conv_size = 3
+    filters = 16
     
     time_steps = input_shape[1]
     features = input_shape[2]
     
-    # Build network
     inputs = Input(shape=(time_steps, features))
-    layer = inputs
+    
+    if attention:
+        layer = attention_layer(inputs, time_steps, features)
+    else:
+        layer = inputs
 
     for i in range(net_depth):
         layer = Conv1D(filters*net_width, conv_size, activation='relu')(layer)
         layer = Conv1D(filters*net_width, conv_size, activation='relu')(layer)
-        
+        layer = Dropout(0.25)(layer)
         if i+1 != net_depth:
             layer = MaxPooling1D(2)(layer)
+            
         else: 
             layer = GlobalAveragePooling1D()(layer)
                 
@@ -179,7 +205,7 @@ def cnn_model(input_shape, net_width, net_depth, attention=False):
     
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(loss='categorical_crossentropy',
-                  optimizer='adam',
+                  optimizer=opt,
                   metrics=[]) #'accuracy', get_f1
     return model
 
@@ -196,8 +222,8 @@ def train_and_test_model(X, Y, model_type):
         widths = [1, 2, 3, 4]
         depths = [1, 2]
 
-    for net_width in widths:
-        for net_depth in depths:
+    for net_depth in depths:
+        for net_width in widths:
             
                 if model_type == 'MLP':
                     model = mlp_model(X.shape, neurons, net_width, net_depth)
@@ -214,7 +240,7 @@ def train_and_test_model(X, Y, model_type):
                 test_lenght = 21
                 train_lenght = 661 
                 
-                epochs = 10 #?
+                epochs = 75 #?
                 
                 train_set = 1 
                 while train_set <= total_trainings:
@@ -233,7 +259,7 @@ def train_and_test_model(X, Y, model_type):
                                   start + train_lenght + test_lenght))
                         
                     model.fit(X_train, Y_train, epochs=epochs, verbose=1,
-                              batch_size=32, class_weight=class_weights)
+                              batch_size=16, class_weight=class_weights)
                     
                     Y_true = np.argmax(Y_test, axis=1)
                     prob = model.predict(X_test)
@@ -245,7 +271,7 @@ def train_and_test_model(X, Y, model_type):
                     train_set += 1
                     start += train_lenght
                     train_lenght = test_lenght
-                    #epochs = 10 # should epochs change?
+                    epochs = 5 # should epochs change?
                 
                 print('\nMean results for', name, ':',
                       np.mean(np.asarray(model_results),axis=0),'\n\n')
@@ -264,18 +290,87 @@ N_TOP_ACTIVE = 100
 num_classes = 3
 window = 20
 class_weights = {0: 1.,
-                1: 8.,
-                2: 9.5}
+                1: 19/3.,
+                2: 16/3.}
 
 X, Y = format_data(data, window)
 Y = to_categorical(Y, num_classes)
 
 # 21 day walk forward validation
 results_together = list()
-for model_type in ['MLP']:
-    result = train_and_test_model(X, Y, model_type)
+for model_type in ['CNN']:
+    neurons = 16 
+    all_results = list()
     
-    for row in result:
+    if model_type == 'MLP':
+        widths = [1, 2, 3, 4]
+        depths = [1, 2, 3, 4]
+    elif model_type == 'CNN':
+        widths = [1]
+        depths = [2]
+    elif model_type == 'LSTM':
+        widths = [1]
+        depths = [1]
+    for net_depth in depths:
+        for net_width in widths:
+            
+                if model_type == 'MLP':
+                    model = mlp_model(X.shape, neurons, net_width, net_depth)
+                elif model_type == 'CNN':
+                    model = cnn_model(X.shape, net_width, net_depth)
+                elif model_type == 'LSTM':
+                    model = lstm_model(X.shape, neurons, net_width, net_depth)
+                    
+                name = model_type + str(net_width) + '-' + str(net_depth)
+                model_results = list() 
+                
+                total_trainings = 12
+                start = 0
+                test_lenght = 21
+                train_lenght = 661 
+                
+                epochs = 50 #?
+                
+                train_set = 1 
+                while train_set <= total_trainings:
+                
+                    X_train, X_test, Y_train, Y_test = split_train_test(
+                        X, Y, start, train_lenght, test_lenght)
+                    
+                    if model_type == 'MLP':
+                        X_train = X_train[:,-1,:]
+                        X_test = X_test[:,-1,:]
+                    # Shape for CNN?
+                    
+                    print(name)
+                    print('Training set {} from {} to {}, with test until {}'\
+                          .format(train_set, start, start + train_lenght, 
+                                  start + train_lenght + test_lenght))
+                        
+                    model.fit(X_train, Y_train, epochs=epochs, verbose=1,
+                              batch_size=16, class_weight=class_weights)
+                    
+                    Y_true = np.argmax(Y_test, axis=1)
+                    prob = model.predict(X_test)
+                    Y_pred = np.argmax(prob, axis=1)
+                    
+                    p, r, f1, kappa = print_result(name, Y_true, Y_pred)
+                    model_results.append([p, r, f1, kappa])
+                    
+                    train_set += 1
+                    start += train_lenght
+                    train_lenght = test_lenght
+                    epochs = 10 # should epochs change?
+                    
+                    #TODO Tutki alpha_T:n arvoja
+                
+                print('\nMean results for', name, ':',
+                      np.mean(np.asarray(model_results),axis=0),'\n\n')
+                all_results.append([name, 
+                                    np.mean(np.asarray(model_results),axis=0)])
+    
+    for row in all_results:
+        print(row)
         results_together.append(row)
 
 print('All results together:')
